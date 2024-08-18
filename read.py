@@ -1,35 +1,31 @@
-# Python script to read an evaluate a whatapp chat and count strings
-
 import re
 import emoji
 from collections import Counter
 import matplotlib.pyplot as plt
 
 # Chat file
-chat_file='chat.txt'
+chat_file = 'chat.txt'
 
 # Open and read the file
 try:
     with open(chat_file, 'r', encoding='utf-8') as f:
-        chat_data=f.readlines()
-        print('Reading of of %s sucessful' %chat_file)
+        chat_data = f.readlines()
+        print(f'Reading of {chat_file} successful')
 except OSError:
-    # 'File not found' error message.
-    print('File %s not found' %chat_file)
-
+    print(f'File {chat_file} not found')
+    exit()
 
 # Regular expression to match WhatsApp chat format
-message_pattern = re.compile(r'(\d{2}/\d{2}/\d{2}, \d{2}:\d{2} - [^:]+): (.+)')
-####### Message pattern not working
+message_pattern = re.compile(r'(\d{2}/\d{2}/\d{2}, \d{2}:\d{2}) - ([^:]+): (.+)')
 
 # Dictionary to store messages
 user_messages = {}
 
-# Prase the chat data
+# Parse the chat data
 for line in chat_data:
     match = message_pattern.match(line)
     if match:
-        user, message = message.groups()
+        timestamp, user, message = match.groups()
         if user not in user_messages:
             user_messages[user] = []
         user_messages[user].append(message)
@@ -57,14 +53,19 @@ for user, emoji_count in user_emojis.items():
 
 # Visualize top 5 emojis for each user
 for user, emoji_count in user_emojis.items():
-    emojis, counts = zip(*emoji_count.most_common(5))
+    if emoji_count:
+        emojis, counts = zip(*emoji_count.most_common(5))
 
-    plt.figure(figsize=(10, 4))
-    plt.bar(emojis, counts, color='skyblue')
-    plt.xlabel('Emojis')
-    plt.ylabel('Counts')
-    plt.title(f'Top 5 Emojis Used by {user}')
-    plt.savefig('i_top_emojis.png')
-    plt.close()
+        plt.figure(figsize=(10, 4))
+        plt.bar(emojis, counts, color='skyblue')
+        plt.xlabel('Emojis')
+        plt.ylabel('Counts')
+        plt.title(f'Top 5 Emojis Used by {user}')
+        plt.savefig(f'top_emojis_{user}.png')
+        plt.close()
+    else:
+        print(f"No emojis used by {user}")
 
-print(user_messages)
+# Optional: Print all user messages if needed
+# print(user_messages)
+
