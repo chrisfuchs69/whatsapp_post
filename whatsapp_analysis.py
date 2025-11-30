@@ -1,255 +1,560 @@
+#!/usr/bin/env python3
+"""
+Whatsapp interactive report generator (Plotly)
+Saves a single file: whatsapp_report.html
+"""
+
 import re
 import emoji
 from collections import Counter, defaultdict
-import matplotlib.pyplot as plt
-import numpy as np
-from datetime import datetime, timedelta
-import matplotlib.dates as mdates
-from wordcloud import WordCloud, STOPWORDS
-import networkx as nx
+from datetime import datetime
 from itertools import combinations
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import networkx as nx
+from wordcloud import WordCloud, STOPWORDS
+from io import BytesIO
+from PIL import Image
+import base64
+import plotly.io as pio
 
-# import matplotlib.pyplot as plt
-# 
-plt.rcParams['font.family'] = '/usr/share/fonts/google-noto-emoji-fonts/NotoEmoji-Regular.ttf'
-# print("Using font: DejaVu Sans")
+# ---------- Config ----------
+CHAT_FILE = "chat.txt"
+OUTPUT_HTML = "whatsapp_report.html"
+TOP_EMOJI_COUNT = 20
 
-
-# === CONFIG ===
-chat_file = 'chat.txt'
-
-
-# === READ CHAT ===
-try:
-    with open(chat_file, 'r', encoding='utf-8') as f:
-        chat_data = f.readlines()
-    print(f"Read {chat_file} successfully")
-except OSError:
-    print(f"File {chat_file} not found")
-    chat_data = []
-
-# === PARSE CHAT ===
-# Format: [23.11.23, 06:53:39] Name: Message
-pattern = re.compile(
-    r'^\[(\d{2}\.\d{2}\.\d{2}), (\d{2}:\d{2}:\d{2})\] ([^:]+): (.+)$'
-)
-
-user_messages = defaultdict(list)
-user_timestamps = defaultdict(list)
-emoji_times = defaultdict(list)
-emoji_counts = Counter()
-emoji_per_user = defaultdict(Counter)
-message_lengths = defaultdict(list)
-message_times = []
-message_senders = []
-message_datetimes = []
-
+# ---------- Helpers ----------
 def extract_emojis(text):
+    """Return list of emojis in text using python-emoji (handles multi-codepoint)."""
     return [e["emoji"] for e in emoji.emoji_list(text)]
 
-for line in chat_data:
-    match = pattern.match(line.strip())
-    if not match:
+# ---------- Parse chat ----------
+# Expected line format: [23.11.23, 06:53:39] Name: Message
+line_re = re.compile(r'^\[(\d{2}\.\d{2}\.\d{2}), (\d{2}:\d{2}:\d{2})\] ([^:]+): (.+)$')
+
+rows = []
+with open(CHAT_FILE, 'r', encoding='utf-8') as f:
+    for raw in f:
+        line = raw.rstrip("\n")
+        m = line_re.match(line)
+        if not m:
+            # skip non-matching lines (continuation lines not handled here)
+            continue
+        date_s, time_s, user, msg = m.groups()
+        dt = datetime.strptime(f"{date_s} {time_s}", "%d.%m.%y %H:%M:%S")
+        rows.append({"datetime": dt, "user": user.strip(), "message": msg})
+
+if not rows:
+    raise SystemExit(f"No messages parsed from {CHAT_FILE} — check file and format.")
+
+df = pd.DataFrame(rows).sort_values("datetime").reset_index(drop=True)
+
+# ---------- Derived columns ----------
+df["date"] = df["datetime"].dt.date
+df["hour"] = df["datetime"].dt.hour
+df["weekday"] = df["datetime"].dt.weekday  # Monday=0
+df["msg_length"] = df["message"].str.len()
+df["emojis"] = df["message"].apply(extract_emojis)
+df["emoji_count"] = df["emojis"].apply(len)
+
+users = df["user"].unique().tolist()
+
+# ---------- Emoji counts per user ----------
+emoji_per_user = df.explode("emojis").dropna(subset=["emojis"]).groupby("user")["emojis"].value_counts()
+total_emoji_counts = df.groupby("user")["emoji_count"].sum().reindex(users).fillna(0).astype(int)
+
+# ---------- Top emojis overall ----------
+emoji_all = df.explode("emojis").dropna(subset=["emojis"])
+top_emojis = emoji_all["emojis"].value_counts().nlargest(TOP_EMOJI_COUNT)
+
+# Build user_emojis dict: user -> Counter of emojis
+user_emojis = {}
+for user in users:
+    user_emoji_counts = emoji_per_user.loc[user] if user in emoji_per_user.index.get_level_values(0) else pd.Series(dtype=int)
+    user_emojis[user] = Counter(user_emoji_counts.to_dict())
+
+# ---------- Emoji usage over time (per day) ----------
+emoji_by_day_user = (df.explode("emojis")
+                       .dropna(subset=["emojis"])
+                       .groupby(["user","date"])
+                       .size()
+                       .reset_index(name="emoji_count_per_day"))
+
+# ---------- Time-of-day distribution for emojis (violin uses hours with fractional minutes if desired) ----------
+# For greater resolution, map each emoji to the fractional hour of the message
+def hour_fraction(dt):
+    return dt.hour + dt.minute/60.0 + dt.second/3600.0
+
+emoji_time_rows = []
+for idx, row in df.iterrows():
+    if row["emoji_count"] == 0:
         continue
-    date_str, time_str, user, message = match.groups()
-    dt = datetime.strptime(f"{date_str} {time_str}", "%d.%m.%y %H:%M:%S")
-    
-    user_messages[user].append(message)
-    user_timestamps[user].append(dt)
-    message_lengths[user].append(len(message))
-    
-    message_times.append(dt)
-    message_senders.append(user)
-    message_datetimes.append(dt)
-    
-    # Emojis and their times per user
-    emojis = extract_emojis(message)
-    if emojis:
-        for em in emojis:
-            emoji_times[user].append(dt.hour + dt.minute/60)
-        emoji_counts.update(emojis)
-        emoji_per_user[user].update(emojis)
+    hf = hour_fraction(row["datetime"])
+    for em in row["emojis"]:
+        emoji_time_rows.append({"user": row["user"], "emoji": em, "hour_frac": hf})
 
-print(f"Parsed {len(message_datetimes)} messages from {len(user_messages)} users")
+df_emoji_time = pd.DataFrame(emoji_time_rows)
 
-# === 1) Total Emojis per User (Bar) ===
-plt.figure(figsize=(8,4))
-users = list(emoji_per_user.keys())
-totals = [sum(emoji_per_user[u].values()) for u in users]
-plt.bar(users, totals, color='skyblue')
-plt.title("Total Emojis per User")
-plt.ylabel("Count")
-plt.xticks(rotation=30)
-plt.tight_layout()
-plt.savefig("plot_total_emojis_per_user.png")
+# ---------- Heatmap: emojis by hour and weekday ----------
+heat = df.explode("emojis").dropna(subset=["emojis"])
+heat_table = heat.groupby(["hour","weekday"]).size().unstack(fill_value=0)
 
-# === 2) Emoji Usage Time of Day (Violin) ===
-plt.figure(figsize=(10,5))
-data = [emoji_times[u] for u in users]
-plt.violinplot(data, showmeans=True)
-plt.xticks(range(1, len(users)+1), users, rotation=30)
-plt.ylabel("Hour of Day (0-24)")
-plt.title("Emoji Usage Time of Day (Violin Plot)")
-plt.tight_layout()
-plt.savefig("plot_emoji_time_of_day_violin.png")
+# ---------- Message activity heatmap (messages count) ----------
+msg_heat_table = df.groupby(["hour","weekday"]).size().unstack(fill_value=0)
 
-# === 3) Emoji Usage Over Time (Line Plot per Day) ===
-# Count emojis per day per user
-emoji_day_counts = defaultdict(lambda: defaultdict(int))  # user -> date -> count
+# ---------- Message length distribution ----------
+# computed per user using df['msg_length']
 
-for user in users:
-    for dt, msgs in zip(user_timestamps[user], user_messages[user]):
-        emojis_in_msg = extract_emojis(msgs)
-        emoji_day_counts[user][dt.date()] += len(emojis_in_msg)
-
-plt.figure(figsize=(12,6))
-for user in users:
-    days = sorted(emoji_day_counts[user].keys())
-    counts = [emoji_day_counts[user][day] for day in days]
-    plt.plot(days, counts, marker='o', label=user)
-plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-plt.xticks(rotation=45)
-plt.ylabel("Number of Emojis")
-plt.title("Emoji Usage Over Time (Per Day)")
-plt.legend()
-plt.tight_layout()
-plt.savefig("plot_emoji_usage_over_time.png")
-
-# === 4) Most Frequent Emojis (Overall) ===
-top_emojis = emoji_counts.most_common(15)
-labels, values = zip(*top_emojis)
-plt.figure(figsize=(8,5))
-plt.barh(labels[::-1], values[::-1], color='lightgreen')
-plt.title("Top 15 Most Frequent Emojis Overall")
-plt.xlabel("Count")
-plt.tight_layout()
-plt.savefig("plot_top_emojis_overall.png")
-
-# === 5) Emoji Heatmap by Hour and Day of Week ===
-heatmap_data = np.zeros((24,7))  # rows=hours, cols=weekdays (Mon=0)
-
-for user in users:
-    for dt, msg in zip(user_timestamps[user], user_messages[user]):
-        hour = dt.hour
-        weekday = dt.weekday()
-        count_emojis = len(extract_emojis(msg))
-        heatmap_data[hour, weekday] += count_emojis
-
-# === 6) Message Length Distribution (Histogram per User) ===
-plt.figure(figsize=(10,6))
-bins = range(0, 300, 10)
-for user in users:
-    plt.hist(message_lengths[user], bins=bins, alpha=0.5, label=user)
-plt.xlabel("Message Length (characters)")
-plt.ylabel("Count")
-plt.title("Message Length Distribution per User")
-plt.legend()
-plt.tight_layout()
-plt.savefig("plot_message_length_histogram.png")
-
-# === 7) Response Time Analysis ===
-# Compute response time between consecutive messages per user (approximate)
+# ---------- Response times per user (in minutes) and average response time ----------
 response_times = defaultdict(list)
+last_ts_per_user = {}
 
-# Sort messages by datetime
-all_msgs = sorted(zip(message_datetimes, message_senders), key=lambda x: x[0])
+for idx, row in df.iterrows():
+    user = row["user"]
+    ts = row["datetime"]
+    if user in last_ts_per_user:
+        diff_min = (ts - last_ts_per_user[user]).total_seconds() / 60.0
+        # Exclude negatives (shouldn't happen) and very long gaps optionally
+        if 0 < diff_min < 60*24:  # < 24h
+            response_times[user].append(diff_min)
+    last_ts_per_user[user] = ts
 
-last_msg_time = {}
-for dt, user in all_msgs:
-    if user in last_msg_time:
-        diff = (dt - last_msg_time[user]).total_seconds() / 60  # in minutes
-        if 0 < diff < 1440:  # Ignore very long breaks > 1 day
-            response_times[user].append(diff)
-    last_msg_time[user] = dt
+avg_response_time = {user: (np.mean(response_times[user]) if response_times[user] else np.nan) for user in users}
 
-plt.figure(figsize=(10,6))
-for user in users:
-    plt.hist(response_times[user], bins=30, alpha=0.5, label=user)
-plt.xlabel("Response Time (minutes)")
-plt.ylabel("Frequency")
-plt.title("Response Time Distribution per User")
-plt.legend()
-plt.tight_layout()
-plt.savefig("plot_response_time_histogram.png")
-
-# Calculate average response time per user (in minutes)
-avg_response_time = {}
-for user, times in response_times.items():
-    if times:
-        avg_response_time[user] = sum(times) / len(times)
-    else:
-        avg_response_time[user] = 0
-
-# Plot average response time per user
-plt.figure(figsize=(8, 4))
-users_sorted = sorted(avg_response_time, key=avg_response_time.get)
-avg_times = [avg_response_time[u] for u in users_sorted]
-
-plt.bar(users_sorted, avg_times, color='salmon')
-plt.ylabel("Average Response Time (minutes)")
-plt.title("Average Response Time per User")
-plt.xticks(rotation=30)
-plt.tight_layout()
-plt.savefig("plot_avg_response_time_per_user.png")
-
-
-# === 8) Emoji Co-occurrence Network ===
-# Build graph of emoji co-occurrences per message (consider messages with ≥2 emojis)
+# ---------- Emoji co-occurrence network ----------
 cooccurrence = Counter()
+for _, row in df.iterrows():
+    ems = list(dict.fromkeys(row["emojis"]))  # unique emojis in message preserving order
+    if len(ems) > 1:
+        for a,b in combinations(sorted(ems), 2):
+            cooccurrence[(a,b)] += 1
 
-for msgs in user_messages.values():
-    for msg in msgs:
-        ems = set(extract_emojis(msg))
-        if len(ems) > 1:
-            for pair in combinations(sorted(ems), 2):
-                cooccurrence[pair] += 1
-
-# Build networkx graph
 G = nx.Graph()
-for (e1,e2), weight in cooccurrence.items():
-    G.add_edge(e1, e2, weight=weight)
+for (a,b),w in cooccurrence.items():
+    G.add_edge(a,b,weight=w)
+# node sizes by total frequency
+node_freq = emoji_all["emojis"].value_counts().to_dict()
+for n in G.nodes():
+    G.nodes[n]["freq"] = node_freq.get(n, 1)
 
-plt.figure(figsize=(10,10))
-pos = nx.spring_layout(G, k=0.3)
-weights = [G[u][v]['weight'] for u,v in G.edges()]
-nx.draw_networkx_nodes(G, pos, node_size=300, node_color='orange')
-nx.draw_networkx_edges(G, pos, width=[w*0.3 for w in weights], alpha=0.7)
-nx.draw_networkx_labels(G, pos, font_size=14)
-plt.title("Emoji Co-occurrence Network")
-plt.axis('off')
-plt.tight_layout()
-plt.savefig("plot_emoji_cooccurrence_network.png")
+# compute layout
+if len(G) > 0:
+    pos = nx.spring_layout(G, k=0.5, iterations=100, seed=42)
+else:
+    pos = {}
 
-# === 9) Daily Activity Heatmap (Messages) ===
-# Count messages per hour per weekday
-msg_heatmap = np.zeros((24,7))
-
-for dt in message_datetimes:
-    msg_heatmap[dt.hour, dt.weekday()] += 1
-
-plt.figure(figsize=(8,6))
-plt.imshow(msg_heatmap, aspect='auto', cmap='plasma', origin='lower')
-plt.colorbar(label="Number of Messages")
-plt.yticks(range(24), [f"{h}:00" for h in range(24)])
-plt.xticks(range(7), ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"])
-plt.title("Message Activity Heatmap by Hour and Day of Week")
-plt.tight_layout()
-plt.savefig("plot_message_activity_heatmap.png")
-
-# === 10) Word Cloud per User ===
+# ---------- Word clouds per user (generate PNG images encoded as base64 to embed) ----------
+wordcloud_images = {}
 for user in users:
-    text = " ".join(user_messages[user])
+    text = " ".join(df.loc[df["user"]==user, "message"].tolist())
+    if not text.strip():
+        continue
     stopwords = set(STOPWORDS)
-    wc = WordCloud(width=800, height=400, background_color='white',
+    wc = WordCloud(width=800, height=400, background_color="white",
                    stopwords=stopwords, collocations=False).generate(text)
-    plt.figure(figsize=(10,5))
-    plt.imshow(wc, interpolation='bilinear')
-    plt.axis('off')
-    plt.title(f"Word Cloud for {user}")
-    plt.tight_layout()
-    plt.savefig(f"wordcloud_{user}.png")
+    img = wc.to_image()
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    b64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    wordcloud_images[user] = f"data:image/png;base64,{b64}"
 
-print("All plots saved!")
+# ---------- Build Plotly Figures ----------
+figs = {}
 
-# Optional: To display plots interactively, add plt.show() calls if running interactively.
+# 1) Total emojis per user (bar)
+figs['total_emojis_per_user'] = px.bar(
+    x=total_emoji_counts.index.astype(str),
+    y=total_emoji_counts.values,
+    labels={'x':'User','y':'Total Emojis'},
+    title='Total Emojis per User'
+)
+
+# 2) Emoji time-of-day violin plot (per user)
+if not df_emoji_time.empty:
+    violin_df = df_emoji_time.copy()
+    figs['emoji_time_violin'] = px.violin(
+        violin_df, x="user", y="hour_frac", points="all",
+        labels={'hour_frac':'Hour of day','user':'User'},
+        title='Emoji Usage Time of Day (Violin plot)'
+    )
+    figs['emoji_time_violin'].update_yaxes(range=[0,24])
+else:
+    figs['emoji_time_violin'] = None
+
+# 3) Emoji usage over time (line plot per user)
+if not emoji_by_day_user.empty:
+    # pivot to ensure zero-filled dates
+    pivot = emoji_by_day_user.pivot(index="date", columns="user", values="emoji_count_per_day").fillna(0)
+    fig = go.Figure()
+    for user in pivot.columns:
+        fig.add_trace(go.Scatter(x=pivot.index, y=pivot[user], mode='lines+markers', name=user))
+    fig.update_layout(title="Emoji Usage Over Time (per day)", xaxis_title="Date", yaxis_title="Emoji count")
+    figs['emoji_usage_over_time'] = fig
+else:
+    figs['emoji_usage_over_time'] = None
+
+# 4) Top emojis overall (horizontal bar)
+if not top_emojis.empty:
+    labels = top_emojis.index.astype(str)
+    values = top_emojis.values
+    figs['top_emojis'] = px.bar(
+        x=values[::-1],
+        #y=labels[::-1],
+        text=labels[::-1],  # show emoji text
+        orientation='h',
+        labels={'x':'Count','y':'Emoji'},
+        title=f"Top {len(labels)} Emojis Overall"
+    )
+    figs['top_emojis'].update_traces(textfont_size=26, textposition="outside")
+    #figs['top_emojis'].update_layout(yaxis=dict(tickfont=dict(size=28)))
+else:
+    figs['top_emojis'] = None
+
+# 5) Emoji heatmap by hour and weekday
+heat_mat = heat_table.reindex(index=range(24), columns=range(7), fill_value=0)
+fig_heat = go.Figure(data=go.Heatmap(
+    z=heat_mat.values,
+    x=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],
+    y=[f"{h}:00" for h in heat_mat.index],
+    colorscale="YlGnBu",
+    colorbar=dict(title="Emoji count")
+))
+fig_heat.update_layout(title="Emoji Heatmap by Hour and Day of Week")
+fig_heat.update_yaxes(autorange='reversed')
+figs['emoji_heatmap'] = fig_heat
+
+# 6) Message activity heatmap (messages)
+msg_mat = msg_heat_table.reindex(index=range(24), columns=range(7), fill_value=0)
+fig_msg_heat = go.Figure(data=go.Heatmap(
+    z=msg_mat.values,
+    x=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],
+    y=[f"{h}:00" for h in msg_mat.index],
+    colorscale="Plasma",
+    colorbar=dict(title="Messages")
+))
+fig_msg_heat.update_layout(title="Message Activity Heatmap by Hour and Day of Week")
+fig_msg_heat.update_yaxes(autorange='reversed')
+figs['message_heatmap'] = fig_msg_heat
+
+# 7) Message length distributions (violin/hist per user) - combined violin
+fig_len = go.Figure()
+for user in users:
+    fig_len.add_trace(go.Violin(x=[user]*len(df.loc[df['user']==user,'msg_length']),
+                                y=df.loc[df['user']==user,'msg_length'],
+                                name=user, box_visible=True, meanline_visible=True))
+fig_len.update_layout(title="Message Length Distribution per User", yaxis_title="Characters")
+figs['message_length'] = fig_len
+
+# 8) Response time histogram and avg response time (bar)
+# histogram (overlayed)
+fig_rt = go.Figure()
+for user in users:
+    vals = response_times.get(user, [])
+    if vals:
+        fig_rt.add_trace(go.Histogram(x=vals, name=user, opacity=0.6))
+fig_rt.update_layout(barmode='overlay', title="Response Time Distribution per User (minutes)", xaxis_title="Minutes")
+figs['response_time_hist'] = fig_rt
+
+# avg response times bar
+avg_df = pd.DataFrame({"user": list(avg_response_time.keys()), "avg_min": list(avg_response_time.values())})
+fig_avg_rt = px.bar(avg_df.sort_values("avg_min"), x="user", y="avg_min", labels={"avg_min":"Avg response (min)","user":"User"},
+                    title="Average Response Time per User (minutes)")
+figs['avg_response_time'] = fig_avg_rt
+
+# 9) Emoji co-occurrence network (plotly scatter)
+if len(G) > 0:
+    edge_x = []
+    edge_y = []
+    edge_w = []
+    for u,v,data in G.edges(data=True):
+        x0,y0 = pos[u]
+        x1,y1 = pos[v]
+        edge_x += [x0, x1, None]
+        edge_y += [y0, y1, None]
+        edge_w.append(data.get('weight',1))
+
+    node_x = []
+    node_y = []
+    node_text = []
+    node_size = []
+    for n in G.nodes():
+        x,y = pos[n]
+        node_x.append(x)
+        node_y.append(y)
+        node_text.append(f"{n} (freq {G.nodes[n]['freq']})")
+        node_size.append(max(20, G.nodes[n]['freq'] * 6))
+
+    edge_trace = go.Scatter(x=edge_x, y=edge_y, mode='lines', line=dict(width=3, color='#888'), hoverinfo='none')
+    node_trace = go.Scatter(x=node_x, y=node_y, mode='markers+text',
+                            text=[n for n in G.nodes()],
+                            hovertext=node_text,
+                            textposition="top center",
+                            marker=dict(size=node_size, color='orange', line=dict(width=1)))
+    fig_net = go.Figure(data=[edge_trace, node_trace])
+    fig_net.update_layout(title="Emoji Co-occurrence Network", showlegend=False)
+    figs['emoji_network'] = fig_net
+else:
+    figs['emoji_network'] = None
+
+# 10) Wordclouds (embedded images)
+# wordcloud_images dict already contains base64 images for each user
+
+
+# ----------------------------
+# 11) Emoji Pairing “Love” Map (Network with styled edges)
+
+if len(G) > 0:
+    # Filter to top N emojis for clarity
+    TOP_N = 25
+    top_emoji_nodes = sorted(node_freq.items(), key=lambda x: x[1], reverse=True)[:TOP_N]
+    top_nodes = set([em for em, freq in top_emoji_nodes])
+    subG = G.subgraph(top_nodes).copy()
+
+    # Positions for subgraph
+    pos_sub = nx.spring_layout(subG, k=0.5, iterations=100, seed=42)
+
+    edge_x = []
+    edge_y = []
+    edge_colors = []
+    edge_widths = []
+    for u, v, d in subG.edges(data=True):
+        x0, y0 = pos_sub[u]
+        x1, y1 = pos_sub[v]
+        edge_x += [x0, x1, None]
+        edge_y += [y0, y1, None]
+        w = d.get('weight', 1)
+        edge_widths.append(max(1, w))
+        if w > 3:
+            edge_colors.append('red')
+        else:
+            edge_colors.append('pink')
+
+    edge_trace = go.Scatter(
+        x=edge_x,
+        y=edge_y,
+        mode='lines',
+        line=dict(color='pink', width=1),
+        hoverinfo='none'
+    )
+
+    node_x = []
+    node_y = []
+    node_text = []
+    node_size = []
+    for n in subG.nodes():
+        x, y = pos_sub[n]
+        node_x.append(x)
+        node_y.append(y)
+        freq = node_freq.get(n, 1)
+        node_text.append(f"{n} (freq {freq})")
+        node_size.append(max(20, freq*6))
+
+    node_trace = go.Scatter(
+        x=node_x,
+        y=node_y,
+        mode='markers+text',
+        text=[n for n in subG.nodes()],
+        textposition="middle center",
+        textfont=dict(size=30),
+        hovertext=node_text,
+        hoverinfo='text',
+        marker=dict(size=node_size, color='lightcoral', line=dict(width=2, color='darkred')),
+    )
+
+    love_map_fig = go.Figure(data=[edge_trace, node_trace])
+    love_map_fig.update_layout(
+        title="Emoji Pairing 'Love' Map",
+        showlegend=False,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        margin=dict(t=40, b=0, l=0, r=0),
+        height=600,
+    )
+    figs['emoji_love_map'] = love_map_fig
+else:
+    figs['emoji_love_map'] = None
+
+# ----------------------------
+# 12) Emoji Sentiment Mood Board (bubble chart by sentiment category)
+
+# Minimal emoji sentiment dictionary, expand if you like
+emoji_sentiment = {
+    '😀': 'Positive', '😃': 'Positive', '😂': 'Positive', '❤️': 'Positive', '👍': 'Positive',
+    '😞': 'Negative', '😡': 'Negative', '😢': 'Negative', '👎': 'Negative',
+    '😐': 'Neutral', '🤔': 'Neutral', '😶': 'Neutral'
+}
+
+# Sum all emoji counts from all users
+all_emoji_counts = Counter()
+for user_counts in user_emojis.values():
+    all_emoji_counts.update(user_counts)
+
+# Group emojis by sentiment
+sentiment_groups = {'Positive': [], 'Negative': [], 'Neutral': []}
+for em, cnt in all_emoji_counts.items():
+    sentiment = emoji_sentiment.get(em, 'Neutral')
+    sentiment_groups[sentiment].append((em, cnt))
+
+# Create scatter traces, cluster them horizontally by sentiment
+mood_board_fig = go.Figure()
+x_offsets = {'Positive': -1, 'Neutral': 0, 'Negative': 1}
+y_base = 0
+
+for sentiment, emojis_list in sentiment_groups.items():
+    for i, (em, cnt) in enumerate(emojis_list):
+        mood_board_fig.add_trace(go.Scatter(
+            x=[x_offsets[sentiment] + i*0.05],
+            y=[y_base],
+            mode='text',
+            text=[em],
+            textfont=dict(size=10 + cnt*4),
+            hoverinfo='text',
+            hovertext=f"{em}: {cnt} times ({sentiment})"
+        ))
+    # Add sentiment label above
+    mood_board_fig.add_trace(go.Scatter(
+        x=[x_offsets[sentiment]],
+        y=[y_base + 0.3],
+        mode='text',
+        text=[sentiment],
+        textfont=dict(size=20, family="Arial Black", color="black"),
+        hoverinfo='skip'
+    ))
+
+mood_board_fig.update_layout(
+    title="Emoji Sentiment Mood Board",
+    xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-2, 2]),
+    yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-0.5, 0.5]),
+    height=300,
+    margin=dict(t=40, b=20, l=20, r=20)
+)
+
+figs['emoji_sentiment_board'] = mood_board_fig
+
+# 13) Chat Timeline Snapshot (message + emoji density per day)
+
+# Aggregate messages and emojis per day
+daily_counts = df.groupby("date").agg(
+    messages=("message", "count"),
+    emojis=("emoji_count", "sum")
+).reset_index()
+
+# Create a grouped bar chart with Plotly
+fig_timeline = go.Figure(data=[
+    go.Bar(name='Messages', x=daily_counts['date'], y=daily_counts['messages'], marker_color='blue'),
+    go.Bar(name='Emojis', x=daily_counts['date'], y=daily_counts['emojis'], marker_color='orange'),
+])
+
+fig_timeline.update_layout(
+    barmode='group',
+    title="Chat Timeline Snapshot: Messages & Emojis per Day",
+    xaxis_title="Date",
+    yaxis_title="Count",
+    xaxis_tickformat='%d %b %Y',
+    xaxis_tickangle=-45,
+    legend_title_text="",
+    template="simple_white"
+)
+
+# Calculate 7-day rolling average trends separately for messages and emojis
+daily_counts['messages_trend'] = daily_counts['messages'].rolling(window=7, min_periods=1, center=True).mean()
+daily_counts['emojis_trend'] = daily_counts['emojis'].rolling(window=7, min_periods=1, center=True).mean()
+
+# Create the figure with bars (messages and emojis)
+fig_timeline = go.Figure(data=[
+    go.Bar(name='Messages', x=daily_counts['date'], y=daily_counts['messages'], marker_color='blue'),
+    go.Bar(name='Emojis', x=daily_counts['date'], y=daily_counts['emojis'], marker_color='orange'),
+])
+
+# Add trend line for messages
+fig_timeline.add_trace(go.Scatter(
+    x=daily_counts['date'],
+    y=daily_counts['messages_trend'],
+    mode='lines',
+    line=dict(color='blue', width=3, dash='dash'),
+    name='Messages Trend'
+))
+
+# Add trend line for emojis
+fig_timeline.add_trace(go.Scatter(
+    x=daily_counts['date'],
+    y=daily_counts['emojis_trend'],
+    mode='lines',
+    line=dict(color='orange', width=3, dash='dash'),
+    name='Emojis Trend'
+))
+
+# Layout updates
+fig_timeline.update_layout(
+    barmode='group',
+    title="Chat Timeline Snapshot: Messages & Emojis per Day",
+    xaxis_title="Date",
+    yaxis_title="Count",
+    xaxis_tickformat='%d %b %Y',
+    xaxis_tickangle=-45,
+    legend_title_text="",
+    template="simple_white"
+)
+
+
+
+figs['chat_timeline_snapshot'] = fig_timeline
+
+
+# ---------- Assemble HTML ----------
+html_parts = []
+html_parts.append("<html><head><meta charset='utf-8'><title>WhatsApp Emoji Report</title></head><body>")
+html_parts.append(f"<h1>WhatsApp Emoji & Chat Report</h1>")
+html_parts.append(f"<p>Messages parsed: {len(df)} · Users: {len(users)} · Date range: {df['datetime'].min()} — {df['datetime'].max()}</p>")
+
+def fig_to_html_div(fig):
+    if fig is None:
+        return "<p><i>No data for this plot.</i></p>"
+    return pio.to_html(fig, full_html=False, include_plotlyjs='cdn')
+
+# add figures sections
+sections = [
+    ("Total Emojis per User", 'total_emojis_per_user'),
+    ("Emoji Usage Time of Day (Violin)", 'emoji_time_violin'),
+    ("Emoji Usage Over Time (Per Day)", 'emoji_usage_over_time'),
+    (f"Top {TOP_EMOJI_COUNT} Emojis Overall", 'top_emojis'),
+    ("Emoji Heatmap by Hour & Day", 'emoji_heatmap'),
+    ("Message Activity Heatmap", 'message_heatmap'),
+    ("Message Length Distribution (per user)", 'message_length'),
+    ("Response Time Distribution (histograms)", 'response_time_hist'),
+    ("Average Response Time per User", 'avg_response_time'),
+    ("Emoji Co-occurrence Network", 'emoji_network'),
+    ("Word Clouds (per user)", None),
+    ("Emoji Pairing 'Love' Map", "emoji_love_map"),
+    ("Emoji Sentiment Mood Board", "emoji_sentiment_board"),
+    ("Chat Timeline Snapshot (message + emoji density per day)", "chat_timeline_snapshot"),
+    ]
+
+for title, key in sections:
+    html_parts.append(f"<hr><h2>{title}</h2>")
+    if key:
+        html_parts.append(fig_to_html_div(figs.get(key)))
+    else:
+        # wordclouds: show one per user
+        for user, img_b64 in wordcloud_images.items():
+            html_parts.append(f"<h3>{user}</h3>")
+            html_parts.append(f"<img src='{img_b64}' alt='Wordcloud for {user}' style='max-width:100%;height:auto;border:1px solid #ddd;padding:4px;margin-bottom:10px;'>")
+
+# Add small summary tables (top emojis)
+html_parts.append("<hr><h2>Top Emojis Table</h2>")
+if not top_emojis.empty:
+    html_parts.append("<table border='1' cellpadding='6'><tr><th>Emoji</th><th>Count</th></tr>")
+    for em, cnt in top_emojis.items():
+        html_parts.append(f"<tr><td style='font-size:24px;text-align:center'>{em}</td><td>{cnt}</td></tr>")
+    html_parts.append("</table>")
+
+html_parts.append("</body></html>")
+
+# Write to file
+with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+    f.write("\n".join(html_parts))
+
+print(f"Report written to {OUTPUT_HTML}. Open this file in a browser to explore the interactive plots.")
 
