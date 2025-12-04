@@ -556,5 +556,7 @@ for title, key in sections:
 with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
     f.write("\n".join(html_parts))
 
+# Get a CSS linebreak https://chatgpt.com/s/t_6931f4dfa92c8191a85aeb821be0352a
+
 print(f"Report written to {OUTPUT_HTML}. Open this file in a browser to explore the interactive plots.")
 
