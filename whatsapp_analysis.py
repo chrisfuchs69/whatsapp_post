@@ -163,12 +163,12 @@ for user in users:
 # ---------- Build Plotly Figures ----------
 figs = {}
 
-# 1) Total emojis per user (bar)
+# 1) Total Emojis per User
 figs['total_emojis_per_user'] = px.bar(
     x=total_emoji_counts.index.astype(str),
     y=total_emoji_counts.values,
     labels={'x':'User','y':'Total Emojis'},
-    title='Total Emojis per User'
+    title='Du natürlich :)'
 )
 
 # 2) Emoji time-of-day violin plot (per user)
@@ -516,20 +516,20 @@ def fig_to_html_div(fig):
 
 # add figures sections
 sections = [
-    ("Total Emojis per User", 'total_emojis_per_user'),
-    ("Emoji Usage Time of Day (Violin)", 'emoji_time_violin'),
-    ("Emoji Usage Over Time (Per Day)", 'emoji_usage_over_time'),
-    (f"Top {TOP_EMOJI_COUNT} Emojis Overall", 'top_emojis'),
-    ("Emoji Heatmap by Hour & Day", 'emoji_heatmap'),
-    ("Message Activity Heatmap", 'message_heatmap'),
-    ("Message Length Distribution (per user)", 'message_length'),
-    ("Response Time Distribution (histograms)", 'response_time_hist'),
-    ("Average Response Time per User", 'avg_response_time'),
-    ("Emoji Co-occurrence Network", 'emoji_network'),
-    ("Word Clouds (per user)", None),
-    ("Emoji Pairing 'Love' Map", "emoji_love_map"),
-    ("Emoji Sentiment Mood Board", "emoji_sentiment_board"),
-    ("Chat Timeline Snapshot (message + emoji density per day)", "chat_timeline_snapshot"),
+    ("Fangen wir künstlerisch an, wenn unser Chat jeweils ein Kunstwerk wäre", None),
+    ("Zu welcher Tageszeit in der Woche waren wir denn besonders fleißig am Texten?", 'message_heatmap'),
+    ("...und am Emojis verschicken?", 'emoji_heatmap'),
+    (f"Dabei waren unsere Top {TOP_EMOJI_COUNT} Emojis diese", 'top_emojis'),
+    ("Aber wie lange musste ich denn immer so warten auf Antwort von dir? Ist da mehr orange als blau?", 'response_time_hist'),
+    ("Jetzt schwarz auf weiß - da lässt sich aber eine länger Zeit...", 'avg_response_time'),
+    ("À propos lang, das scheint dir zu gefallen, thats what the statistics says", 'message_length'),
+    ("Ich lenke ab, zurück zu den Emojis: Lecker ist gemeinsam mit Tims Sonnenbrille bei uns ziemlich isoliert von den anderen", "emoji_love_map"),
+    ("Unser Spirit Animal ist auf jeden Fall Tim '😂'", "emoji_sentiment_board"),
+    ("An den Tagen kann man es nicht mehr ablesen wer nun führt bzgl. der Emojis", 'emoji_usage_over_time'),
+    ("Hier mal auf die Tageszeit im gemittelt, also vor 8 ist bei mir mit keinem Emoji zu rechnen", 'emoji_time_violin'),
+    ("Hier jetzt schwarz auf weiß, wer hat denn nun die meisten Emojis versendet?", 'total_emojis_per_user'),
+#    ("Emoji Co-occurrence Network", 'emoji_network'),
+#    ("Chat timeline_snapshot", "chat_timeline_snapshot"),
     ]
 
 for title, key in sections:
@@ -542,15 +542,15 @@ for title, key in sections:
             html_parts.append(f"<h3>{user}</h3>")
             html_parts.append(f"<img src='{img_b64}' alt='Wordcloud for {user}' style='max-width:100%;height:auto;border:1px solid #ddd;padding:4px;margin-bottom:10px;'>")
 
-# Add small summary tables (top emojis)
-html_parts.append("<hr><h2>Top Emojis Table</h2>")
-if not top_emojis.empty:
-    html_parts.append("<table border='1' cellpadding='6'><tr><th>Emoji</th><th>Count</th></tr>")
-    for em, cnt in top_emojis.items():
-        html_parts.append(f"<tr><td style='font-size:24px;text-align:center'>{em}</td><td>{cnt}</td></tr>")
-    html_parts.append("</table>")
-
-html_parts.append("</body></html>")
+## Add small summary tables (top emojis)
+#html_parts.append("<hr><h2>Top Emojis Table</h2>")
+#if not top_emojis.empty:
+#    html_parts.append("<table border='1' cellpadding='6'><tr><th>Emoji</th><th>Count</th></tr>")
+#    for em, cnt in top_emojis.items():
+#        html_parts.append(f"<tr><td style='font-size:24px;text-align:center'>{em}</td><td>{cnt}</td></tr>")
+#    html_parts.append("</table>")
+#
+#html_parts.append("</body></html>")
 
 # Write to file
 with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
