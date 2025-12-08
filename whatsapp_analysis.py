@@ -21,7 +21,7 @@ import base64
 import plotly.io as pio
 
 # ---------- Config ----------
-CHAT_FILE = "chat.txt"
+CHAT_FILE = "chat_complete.txt"
 OUTPUT_HTML = "whatsapp_report.html"
 TOP_EMOJI_COUNT = 20
 
