@@ -49,12 +49,12 @@ def hour_fraction(dt: datetime) -> float:
 
 def apply_font_sizes(fig: go.Figure) -> go.Figure:
     fig.update_layout(
-        title_font=dict(size=20),
-        xaxis_title_font=dict(size=16),
-        yaxis_title_font=dict(size=16),
-        xaxis_tickfont=dict(size=14),
-        yaxis_tickfont=dict(size=14),
-        legend=dict(font=dict(size=14))
+        title_font=dict(size=25),
+        xaxis_title_font=dict(size=20),
+        yaxis_title_font=dict(size=20),
+        xaxis_tickfont=dict(size=18),
+        yaxis_tickfont=dict(size=18),
+        legend=dict(font=dict(size=18))
     )
     return fig
 
@@ -227,6 +227,7 @@ def plot_total_emojis_per_user(total_emoji_counts: pd.Series) -> Optional[go.Fig
         labels={'x':'User','y':'Total Emojis'},
         title='Du natürlich :)'
     )
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_time_violin(df_emoji_time: pd.DataFrame) -> Optional[go.Figure]:
@@ -239,6 +240,7 @@ def plot_emoji_time_violin(df_emoji_time: pd.DataFrame) -> Optional[go.Figure]:
         title='Emoji Usage Time of Day (Violin plot)'
     )
     fig.update_yaxes(range=[0,24])
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_usage_over_time(emoji_by_day_user: pd.DataFrame) -> Optional[go.Figure]:
@@ -250,6 +252,7 @@ def plot_emoji_usage_over_time(emoji_by_day_user: pd.DataFrame) -> Optional[go.F
         fig.add_trace(go.Scatter(x=pivot.index, y=pivot[user], mode='lines+markers', name=user))
     fig.update_layout(title="Emoji Usage Over Time (per day)", xaxis_title="Date", yaxis_title="Emoji count")
     fig.update_yaxes(type="log")
+    apply_font_sizes(fig)
     return fig
 
 def plot_top_emojis(top_emojis: pd.Series) -> Optional[go.Figure]:
@@ -265,6 +268,7 @@ def plot_top_emojis(top_emojis: pd.Series) -> Optional[go.Figure]:
         title=f"Top {len(labels)} Emojis Overall"
     )
     fig.update_traces(textfont_size=26, textposition="outside")
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_heatmap(heat_table: pd.DataFrame) -> go.Figure:
@@ -278,6 +282,7 @@ def plot_emoji_heatmap(heat_table: pd.DataFrame) -> go.Figure:
     ))
     fig.update_layout(title="Emoji Heatmap by Hour and Day of Week")
     fig.update_yaxes(autorange='reversed')
+    apply_font_sizes(fig)
     return fig
 
 def plot_message_heatmap(msg_heat_table: pd.DataFrame) -> go.Figure:
@@ -291,6 +296,7 @@ def plot_message_heatmap(msg_heat_table: pd.DataFrame) -> go.Figure:
     ))
     fig.update_layout(title="Message Activity Heatmap by Hour and Day of Week")
     fig.update_yaxes(autorange='reversed')
+    apply_font_sizes(fig)
     return fig
 
 def plot_message_length(df: pd.DataFrame) -> go.Figure:
@@ -303,6 +309,7 @@ def plot_message_length(df: pd.DataFrame) -> go.Figure:
         fig.add_trace(go.Violin(x=[user]*len(lengths), y=lengths, name=user, box_visible=True, meanline_visible=True))
     fig.update_layout(title="Message Length Distribution per User", yaxis_title="Characters")
     fig.update_yaxes(type="log")
+    apply_font_sizes(fig)
     return fig
 
 def plot_response_time_hist(response_times: Dict[str, List[float]]) -> go.Figure:
@@ -312,6 +319,7 @@ def plot_response_time_hist(response_times: Dict[str, List[float]]) -> go.Figure
             continue
         fig.add_trace(go.Histogram(x=vals, name=user, opacity=0.6))
     fig.update_layout(barmode='overlay', title="Response Time Distribution per User (minutes)", xaxis_title="Minutes")
+    apply_font_sizes(fig)
     return fig
 
 def plot_avg_response_time(avg_response_time: Dict[str, float]) -> go.Figure:
@@ -319,6 +327,7 @@ def plot_avg_response_time(avg_response_time: Dict[str, float]) -> go.Figure:
     fig = px.bar(avg_df.sort_values("avg_min"), x="user", y="avg_min",
                  labels={"avg_min":"Avg response (min)","user":"User"},
                  title="Average Response Time per User (minutes)")
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_network(G: nx.Graph, pos: dict) -> Optional[go.Figure]:
@@ -351,6 +360,7 @@ def plot_emoji_network(G: nx.Graph, pos: dict) -> Optional[go.Figure]:
                             marker=dict(size=node_size, color='orange', line=dict(width=1)))
     fig = go.Figure(data=[edge_trace, node_trace])
     fig.update_layout(title="Emoji Co-occurrence Network", showlegend=False)
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_love_map(G: nx.Graph, node_freq: dict) -> Optional[go.Figure]:
@@ -413,6 +423,7 @@ def plot_emoji_love_map(G: nx.Graph, node_freq: dict) -> Optional[go.Figure]:
         margin=dict(t=40, b=0, l=0, r=0),
         height=600,
     )
+    apply_font_sizes(fig)
     return fig
 
 def plot_emoji_sentiment_board(all_emoji_counts: Counter) -> go.Figure:
@@ -458,6 +469,7 @@ def plot_emoji_sentiment_board(all_emoji_counts: Counter) -> go.Figure:
         height=300,
         margin=dict(t=40, b=20, l=20, r=20)
     )
+    apply_font_sizes(fig)
     return fig
 
 def plot_chat_timeline_snapshot(daily_counts: pd.DataFrame) -> go.Figure:
@@ -489,6 +501,7 @@ def plot_chat_timeline_snapshot(daily_counts: pd.DataFrame) -> go.Figure:
         legend_title_text="",
         template="simple_white"
     )
+    apply_font_sizes(fig)
     return fig
 
 # ---------- HTML assembly ----------
