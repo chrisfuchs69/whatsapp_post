@@ -302,6 +302,7 @@ def plot_message_length(df: pd.DataFrame) -> go.Figure:
             continue
         fig.add_trace(go.Violin(x=[user]*len(lengths), y=lengths, name=user, box_visible=True, meanline_visible=True))
     fig.update_layout(title="Message Length Distribution per User", yaxis_title="Characters")
+    fig.update_yaxes(type="log")
     return fig
 
 def plot_response_time_hist(response_times: Dict[str, List[float]]) -> go.Figure:
@@ -389,7 +390,7 @@ def plot_emoji_love_map(G: nx.Graph, node_freq: dict) -> Optional[go.Figure]:
         node_y.append(y)
         freq = node_freq.get(n, 1)
         node_text.append(f"{n} (freq {freq})")
-        node_size.append(max(20, freq*6))
+        node_size.append(max(20, freq*1))
 
     node_trace = go.Scatter(
         x=node_x,
@@ -436,7 +437,7 @@ def plot_emoji_sentiment_board(all_emoji_counts: Counter) -> go.Figure:
                 y=[y_base],
                 mode='text',
                 text=[em],
-                textfont=dict(size=10 + cnt*4),
+                textfont=dict(size=10 + cnt*1),
                 hoverinfo='text',
                 hovertext=f"{em}: {cnt} times ({sentiment})"
             ))
@@ -531,8 +532,8 @@ def build_html_report(output_path: str,
         ("...und am Emojis verschicken?", 'emoji_heatmap'),
         (f"Dabei waren unsere Top {TOP_EMOJI_COUNT} Emojis diese", 'top_emojis'),
         ("Aber wie lange musste ich denn immer so warten auf Antwort von dir? Ist da mehr orange als blau?", 'response_time_hist'),
-        ("Jetzt schwarz auf weiß - da lässt sich aber eine länger Zeit...", 'avg_response_time'),
-        ("À propos lang, das scheint dir zu gefallen, thats what the statistics says", 'message_length'),
+        ("Jetzt schwarz auf weiß - eine ganz knappe Kiste, 10,1 Sekunden warte ich länger auf deine Antwort...", 'avg_response_time'),
+        ("À propos länger, das scheint dir zu gefallen, thats what the statistics says", 'message_length'),
         ("Ich lenke ab, zurück zu den Emojis: Lecker ist gemeinsam mit Tims Sonnenbrille bei uns ziemlich isoliert von den anderen", "emoji_love_map"),
         ("Unser Spirit Animal ist auf jeden Fall Tim '😂'", "emoji_sentiment_board"),
         ("An den Tagen kann man es nicht mehr ablesen wer nun führt bzgl. der Emojis", 'emoji_usage_over_time'),
