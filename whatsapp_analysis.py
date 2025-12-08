@@ -49,6 +49,8 @@ def hour_fraction(dt: datetime) -> float:
 
 def apply_font_sizes(fig: go.Figure) -> go.Figure:
     fig.update_layout(
+        # width=560,
+        # height=794,
         title_font=dict(size=25),
         xaxis_title_font=dict(size=20),
         yaxis_title_font=dict(size=20),
