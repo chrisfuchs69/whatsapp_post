@@ -505,7 +505,21 @@ figs['chat_timeline_snapshot'] = fig_timeline
 
 # ---------- Assemble HTML ----------
 html_parts = []
-html_parts.append("<html><head><meta charset='utf-8'><title>WhatsApp Emoji Report</title></head><body>")
+html_parts.append("""
+<html>
+<head>
+<meta charset='utf-8'>
+<title>WhatsApp Emoji Report</title>
+<style>
+@media print {
+    .pagebreak {
+        page-break-after: always;
+    }
+}
+</style>
+</head>
+<body>
+""")
 html_parts.append(f"<h1>WhatsApp Emoji & Chat Report</h1>")
 html_parts.append(f"<p>Messages parsed: {len(df)} · Users: {len(users)} · Date range: {df['datetime'].min()} — {df['datetime'].max()}</p>")
 
@@ -532,25 +546,27 @@ sections = [
 #    ("Chat timeline_snapshot", "chat_timeline_snapshot"),
     ]
 
+
+first = True
 for title, key in sections:
+    if not first:
+        html_parts.append("<div class='pagebreak'></div>")
+    first = False
+
     html_parts.append(f"<hr><h2>{title}</h2>")
+
     if key:
-        html_parts.append(fig_to_html_div(figs.get(key)))
+        fig_html = fig_to_html_div(figs.get(key))
+        html_parts.append(fig_html)
     else:
-        # wordclouds: show one per user
         for user, img_b64 in wordcloud_images.items():
             html_parts.append(f"<h3>{user}</h3>")
-            html_parts.append(f"<img src='{img_b64}' alt='Wordcloud for {user}' style='max-width:100%;height:auto;border:1px solid #ddd;padding:4px;margin-bottom:10px;'>")
+            html_parts.append(
+                f"<img src='{img_b64}' alt='Wordcloud for {user}' "
+                "style='max-width:100%;height:auto;"
+                "border:1px solid #ddd;padding:4px;margin-bottom:10px;'>"
+            )
 
-## Add small summary tables (top emojis)
-#html_parts.append("<hr><h2>Top Emojis Table</h2>")
-#if not top_emojis.empty:
-#    html_parts.append("<table border='1' cellpadding='6'><tr><th>Emoji</th><th>Count</th></tr>")
-#    for em, cnt in top_emojis.items():
-#        html_parts.append(f"<tr><td style='font-size:24px;text-align:center'>{em}</td><td>{cnt}</td></tr>")
-#    html_parts.append("</table>")
-#
-#html_parts.append("</body></html>")
 
 # Write to file
 with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
